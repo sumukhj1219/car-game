@@ -1,6 +1,7 @@
 import './style.css'
 
 import * as THREE from 'three'
+import * as dat from 'dat.gui'
 
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
@@ -59,6 +60,13 @@ world.broadphase = new CANNON.SAPBroadphase(world);
 const car = new Car(scene, world);
 
 car.init();
+
+const gui = new dat.GUI()
+const wheelOffsetFolder = gui.addFolder('Wheel Visual Offsets')
+wheelOffsetFolder.add(car, 'wheelVisualInset', -0.4, 0.4, 0.005).name('Inset')
+wheelOffsetFolder.add(car, 'wheelVisualHeightOffset', -0.4, 0.4, 0.005).name('Height')
+wheelOffsetFolder.add(car, 'wheelVisualForwardOffset', -0.6, 0.6, 0.005).name('Forward')
+wheelOffsetFolder.open()
 
 
 
@@ -524,7 +532,7 @@ const createPoleMaterial = () => {
 
 return new THREE.MeshStandardMaterial({
 
-color: new THREE.Color('#8a9098'),
+color: new THREE.Color('#2a2a2b'),
 
 metalness: 0.7,
 
@@ -542,7 +550,7 @@ const createCageMaterial = () => {
 
 return new THREE.MeshStandardMaterial({
 
-color: new THREE.Color('#8f959d'),
+color: new THREE.Color('#2a2a2b'),
 
 metalness: 0.85,
 
@@ -1110,7 +1118,7 @@ gltfLoader.load('./car/track.glb', (gltf) => {
 const track = gltf.scene
 
 track.scale.setScalar(50)
-const spawnPoint = new THREE.Vector3(35.116717589755346, 3.2388459807938275, -481.6891406739944)
+const spawnPoint = new THREE.Vector3(35.116717589755346, 0.2388459807938275, -481.6891406739944)
 
 let hasPlaneSpawn = false
 let hasMainPlaneCollider = false
@@ -1386,7 +1394,29 @@ const timeStep = 1 / 60 // seconds
 
 let lastCallTime
 
-const cameraOffset = new THREE.Vector3(0, 2, -8)
+const cameraViews = {
+chase: { offset: new THREE.Vector3(0, 2, -8), lookAtHeight: 1.5, smoothness: 0.12 },
+hood: { offset: new THREE.Vector3(0, 1.2, 2.1), lookAtHeight: 1.2, smoothness: 0.18 },
+front: { offset: new THREE.Vector3(0, 2.4, 8), lookAtHeight: 1.2, smoothness: 0.1 },
+left: { offset: new THREE.Vector3(-8, 2.1, 0), lookAtHeight: 1.3, smoothness: 0.1 },
+right: { offset: new THREE.Vector3(8, 2.1, 0), lookAtHeight: 1.3, smoothness: 0.1 },
+topRear: { offset: new THREE.Vector3(0, 9, -5), lookAtHeight: 1.2, smoothness: 0.1 },
+top: { offset: new THREE.Vector3(0, 13, 0.01), lookAtHeight: 0.6, smoothness: 0.08 },
+farChase: { offset: new THREE.Vector3(0, 4, -14), lookAtHeight: 1.5, smoothness: 0.08 },
+}
+
+const numpadCameraMap = {
+Numpad1: 'chase',
+Numpad2: 'hood',
+Numpad3: 'front',
+Numpad4: 'left',
+Numpad6: 'right',
+Numpad7: 'topRear',
+Numpad8: 'top',
+Numpad9: 'farChase',
+}
+
+let activeCameraView = 'chase'
 
 const desiredCameraPosition = new THREE.Vector3()
 
@@ -1395,6 +1425,14 @@ const carWorldPosition = new THREE.Vector3()
 const lookAtTarget = new THREE.Vector3()
 
 const cameraSmoothness = 0.12
+
+window.addEventListener('keydown', (event) => {
+const viewName = numpadCameraMap[event.code]
+if (!viewName) {
+return
+}
+activeCameraView = viewName
+})
 
 
 
@@ -1428,11 +1466,13 @@ if (chassisBody) {
 
 carWorldPosition.set(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z)
 
-desiredCameraPosition.copy(cameraOffset).applyQuaternion(chassisBody.quaternion).add(carWorldPosition)
+const view = cameraViews[activeCameraView] || cameraViews.chase
 
-camera.position.lerp(desiredCameraPosition, cameraSmoothness)
+desiredCameraPosition.copy(view.offset).applyQuaternion(chassisBody.quaternion).add(carWorldPosition)
 
-lookAtTarget.copy(carWorldPosition).add(new THREE.Vector3(0, 1.5, 0))
+camera.position.lerp(desiredCameraPosition, view.smoothness ?? cameraSmoothness)
+
+lookAtTarget.copy(carWorldPosition).add(new THREE.Vector3(0, view.lookAtHeight ?? 1.5, 0))
 
 camera.lookAt(lookAtTarget)
 

@@ -19,17 +19,37 @@ export default class Car {
         };
         this.chassisModelPos = {
             x: 0,
-            y: -0.629999999999999,
+            y: 0,
             z: 0
         };
         this.wheelScale = {
             frontWheel: 1.1,
-            hindWheel: 1.1
+            hindWheel: 1.5
         };
+        this.wheelVisualInset = 0;
+        this.wheelVisualHeightOffset = -0.1;
+        this.wheelVisualForwardOffset = 0;
         this.mass = 250;
         this.spawnPoint = new CANNON.Vec3(0, 4, 0);
-        this.spawnHeightOffset = 0.35;
+        this.spawnHeightOffset = 0.15;
         this.spawnYaw = -Math.PI * 0.5;
+        this.modelYawOffset = 0;
+        this.chassisModelRotationOffset = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0),
+            this.modelYawOffset
+        );
+        this.wheelModelRotationOffset = new THREE.Quaternion();
+        this.wheelSideFlipOffset = new THREE.Quaternion();
+        this.chassisInitialWorldPosition = null;
+        this.chassisInitialWorldQuaternion = null;
+        this.chassisVisualOffsetLocal = new THREE.Vector3();
+        this.chassisVisualRotationOffset = new THREE.Quaternion();
+        this.hasCalibratedChassisTransform = false;
+        this.wheelInitialWorldPositions = [null, null, null, null];
+        this.wheelInitialWorldQuaternions = [null, null, null, null];
+        this.wheelVisualOffsetsLocal = [null, null, null, null];
+        this.wheelVisualRotationOffsets = [null, null, null, null];
+        this.hasCalibratedWheelOffsets = false;
         this.processControls = null;
         this.currentSteer = 0;
         this.currentThrottle = 0;
@@ -57,45 +77,61 @@ export default class Car {
 
         gltfLoader.setDRACOLoader(dracoLoader);
 
-        gltfLoader.load('./car/chassis.gltf', gltf => {
-            this.chassis = gltf.scene;
-            this.chassis.traverse(object => {
+        const normalizeName = (name) => (name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const findNodeByName = (nodes, name) => {
+            const target = normalizeName(name);
+            return nodes.find((node) => normalizeName(node.name) === target) || null;
+        };
+
+        gltfLoader.load('./car/car.glb', (gltf) => {
+            const carRoot = gltf.scene;
+            carRoot.updateMatrixWorld(true);
+            const nodes = [];
+            carRoot.traverse((object) => {
+                nodes.push(object);
                 if (object.isMesh) {
                     object.castShadow = true;
-                    object.material = new THREE.MeshStandardMaterial({
-                        color: 'white',
-                        metalness: 0.5,
-                        roughness: 0.5,
-                    });
+                    object.receiveShadow = true;
+                    if (Array.isArray(object.material)) {
+                        object.material.forEach((material) => {
+                            if (material) material.needsUpdate = true;
+                        });
+                    } else if (object.material) {
+                        object.material.needsUpdate = true;
+                    }
                 }
             });
-            this.scene.add(this.chassis);
-        });
 
-        // Pre-fill so indices are reserved — GLTF callbacks may resolve out of order
-        this.wheels = [null, null, null, null];
-        for (let i = 0; i < 4; i++) {
-            const slotIndex = i; // capture before async boundary
-            gltfLoader.load('./car/wheel.gltf', gltf => {
-                const model = gltf.scene;
-                this.wheels[slotIndex] = model;
-                // Wheels 1 and 3 are on the left side — mirror them
-                if (slotIndex === 1 || slotIndex === 3) {
-                    model.scale.set(
-                        -1 * this.wheelScale.frontWheel,
-                        1  * this.wheelScale.frontWheel,
-                        -1 * this.wheelScale.frontWheel
-                    );
-                } else {
-                    model.scale.set(
-                        1 * this.wheelScale.frontWheel,
-                        1 * this.wheelScale.frontWheel,
-                        1 * this.wheelScale.frontWheel
-                    );
-                }
-                this.scene.add(model);
-            });
-        }
+            this.wheels = [null, null, null, null];
+            this.wheelInitialWorldPositions = [null, null, null, null];
+            this.wheelInitialWorldQuaternions = [null, null, null, null];
+            this.wheelVisualOffsetsLocal = [null, null, null, null];
+            this.wheelVisualRotationOffsets = [null, null, null, null];
+            this.hasCalibratedWheelOffsets = false;
+            this.chassisInitialWorldPosition = null;
+            this.chassisInitialWorldQuaternion = null;
+            this.chassisVisualOffsetLocal.set(0, 0, 0);
+            this.chassisVisualRotationOffset.identity();
+            this.hasCalibratedChassisTransform = false;
+
+            const wheelNodeNames = ['wheel_fl', 'wheel_fr', 'wheel_rl', 'wheel_rr'];
+            for (let i = 0; i < 4; i++) {
+                const wheelNode = findNodeByName(nodes, wheelNodeNames[i]);
+                if (!wheelNode) continue;
+                this.wheels[i] = wheelNode;
+                this.wheelInitialWorldPositions[i] = wheelNode.getWorldPosition(new THREE.Vector3());
+                this.wheelInitialWorldQuaternions[i] = wheelNode.getWorldQuaternion(new THREE.Quaternion());
+                this.scene.attach(wheelNode);
+            }
+
+            const chassisNode = findNodeByName(nodes, 'chassis') || findNodeByName(nodes, 'Chassis') || carRoot;
+            this.chassis = chassisNode;
+            this.scene.attach(this.chassis);
+            this.chassisInitialWorldPosition = this.chassis.getWorldPosition(new THREE.Vector3());
+            this.chassisInitialWorldQuaternion = this.chassis.getWorldQuaternion(new THREE.Quaternion());
+        }, undefined, (error) => {
+            console.error('Failed to load ./car/car.glb', error);
+        });
     }
 
     setChassis() {
@@ -256,7 +292,7 @@ export default class Car {
             const reverse   = this.keysPressed.has('s') || this.keysPressed.has('arrowdown');
             const handbrake = this.keysPressed.has(' ');
 
-            const targetThrottle = (forward ? 1 : 0) + (reverse ? -1 : 0);
+            const targetThrottle = (forward ? -1 : 0) + (reverse ? 1 : 0);
             this.currentThrottle += (targetThrottle - this.currentThrottle) *
                 Math.min(1, throttleResponse * fixedDt);
 
@@ -269,12 +305,12 @@ export default class Car {
             this.currentSteer += (targetSteer - this.currentSteer) *
                 Math.min(1, steerResponse * fixedDt);
 
-            // Wheel order is rear (0,1) then front (2,3) in this rig.
+            // Wheel order in this rig is front (0,1) then rear (2,3).
             // Keep rear wheels straight and steer only the front axle.
-            this.car.setSteeringValue(0, 0);
-            this.car.setSteeringValue(0, 1);
-            this.car.setSteeringValue(this.currentSteer, 2);
-            this.car.setSteeringValue(this.currentSteer, 3);
+            this.car.setSteeringValue(this.currentSteer, 0);
+            this.car.setSteeringValue(this.currentSteer, 1);
+            this.car.setSteeringValue(0, 2);
+            this.car.setSteeringValue(0, 3);
 
             if (handbrake) {
                 this.clearEngineForce();
@@ -303,9 +339,9 @@ export default class Car {
                 const reverseScale = this.currentThrottle > 0 ? 1 : reverseForceScale;
                 const driveForce  = maxForce * Math.abs(this.currentThrottle) * reverseScale * engineSign;
 
-                // Rear-wheel drive (0,1). Front wheels (2,3) are steering wheels.
-                this.car.applyEngineForce(driveForce, 0);
-                this.car.applyEngineForce(driveForce, 1);
+                // Rear-wheel drive (2,3). Front wheels (0,1) are steering wheels.
+                this.car.applyEngineForce(driveForce, 2);
+                this.car.applyEngineForce(driveForce, 3);
             } else {
                 this.clearEngineForce();
                 // Coast braking on all four wheels when no throttle input
@@ -341,7 +377,6 @@ export default class Car {
                 this.processControls();
             }
             
-            console.log(this.car.chassisBody.position)
             const chassisReady =
                 this.car.wheelInfos &&
                 this.chassis.position &&
@@ -351,24 +386,96 @@ export default class Car {
             if (!chassisReady) return;
 
             // Sync Three.js chassis mesh to Cannon body
-            this.chassis.position.set(
-                this.car.chassisBody.position.x + this.chassisModelPos.x,
-                this.car.chassisBody.position.y + this.chassisModelPos.y,
-                this.car.chassisBody.position.z + this.chassisModelPos.z
+            const chassisBodyPosition = new THREE.Vector3(
+                this.car.chassisBody.position.x,
+                this.car.chassisBody.position.y,
+                this.car.chassisBody.position.z
             );
-            this.chassis.quaternion.copy(this.car.chassisBody.quaternion);
+            const chassisBodyQuaternion = new THREE.Quaternion(
+                this.car.chassisBody.quaternion.x,
+                this.car.chassisBody.quaternion.y,
+                this.car.chassisBody.quaternion.z,
+                this.car.chassisBody.quaternion.w
+            );
+
+            if (!this.hasCalibratedChassisTransform && this.chassisInitialWorldPosition && this.chassisInitialWorldQuaternion) {
+                const chassisWorldOffset = this.chassisInitialWorldPosition.clone().sub(chassisBodyPosition);
+                this.chassisVisualOffsetLocal.copy(
+                    chassisWorldOffset.applyQuaternion(chassisBodyQuaternion.clone().invert())
+                );
+                this.chassisVisualRotationOffset.copy(
+                    chassisBodyQuaternion.clone().invert().multiply(this.chassisInitialWorldQuaternion)
+                );
+                this.hasCalibratedChassisTransform = true;
+            }
+
+            const manualChassisOffset = new THREE.Vector3(
+                this.chassisModelPos.x,
+                this.chassisModelPos.y,
+                this.chassisModelPos.z
+            );
+            const combinedChassisLocalOffset = this.chassisVisualOffsetLocal.clone().add(manualChassisOffset);
+            const combinedChassisWorldOffset = combinedChassisLocalOffset.applyQuaternion(chassisBodyQuaternion);
+            this.chassis.position.copy(chassisBodyPosition.add(combinedChassisWorldOffset));
+            this.chassis.quaternion
+                .copy(chassisBodyQuaternion)
+                .multiply(this.chassisVisualRotationOffset)
+                .multiply(this.chassisModelRotationOffset);
 
             // Sync wheel meshes
             for (let i = 0; i < 4; i++) {
                 if (this.car.wheelInfos[i] && this.wheels[i]) {
                     this.car.updateWheelTransform(i);
-                    this.wheels[i].position.copy(
-                        this.car.wheelInfos[i].worldTransform.position
+                    const wheelPhysicsPosition = this.car.wheelInfos[i].worldTransform.position;
+                    const wheelPhysicsPositionThree = new THREE.Vector3(
+                        wheelPhysicsPosition.x,
+                        wheelPhysicsPosition.y,
+                        wheelPhysicsPosition.z
                     );
-                    this.wheels[i].quaternion.copy(
-                        this.car.wheelInfos[i].worldTransform.quaternion
+                    this.wheels[i].position.copy(wheelPhysicsPositionThree);
+
+                    if (!this.hasCalibratedWheelOffsets && this.wheelInitialWorldPositions[i]) {
+                        const worldOffset = this.wheelInitialWorldPositions[i].clone().sub(wheelPhysicsPositionThree);
+                        const localOffset = worldOffset.applyQuaternion(chassisBodyQuaternion.clone().invert());
+                        this.wheelVisualOffsetsLocal[i] = localOffset;
+                    }
+
+                    const wheelPhysicsQuaternion = new THREE.Quaternion(
+                        this.car.wheelInfos[i].worldTransform.quaternion.x,
+                        this.car.wheelInfos[i].worldTransform.quaternion.y,
+                        this.car.wheelInfos[i].worldTransform.quaternion.z,
+                        this.car.wheelInfos[i].worldTransform.quaternion.w
                     );
+
+                    if (!this.hasCalibratedWheelOffsets && this.wheelInitialWorldQuaternions[i]) {
+                        this.wheelVisualRotationOffsets[i] = wheelPhysicsQuaternion
+                            .clone()
+                            .invert()
+                            .multiply(this.wheelInitialWorldQuaternions[i]);
+                    }
+
+                    const side = Math.sign(this.car.wheelInfos[i].chassisConnectionPointLocal.x) || 0;
+                    if (side !== 0 || this.wheelVisualHeightOffset !== 0 || this.wheelVisualForwardOffset !== 0 || this.wheelVisualOffsetsLocal[i]) {
+                        const localVisualOffset = (this.wheelVisualOffsetsLocal[i] || new THREE.Vector3()).clone().add(
+                            new THREE.Vector3(
+                                -side * this.wheelVisualInset,
+                                this.wheelVisualHeightOffset,
+                                this.wheelVisualForwardOffset
+                            )
+                        );
+                        const worldOffset = localVisualOffset.applyQuaternion(chassisBodyQuaternion);
+                        this.wheels[i].position.add(worldOffset);
+                    }
+                    this.wheels[i].quaternion
+                        .copy(wheelPhysicsQuaternion)
+                        .multiply(this.wheelVisualRotationOffsets[i] || new THREE.Quaternion())
+                        .multiply(this.wheelModelRotationOffset);
                 }
+            }
+            if (!this.hasCalibratedWheelOffsets) {
+                const allPositionOffsetsReady = this.wheelVisualOffsetsLocal.every((offset) => Boolean(offset));
+                const allRotationOffsetsReady = this.wheelVisualRotationOffsets.every((offset) => Boolean(offset));
+                this.hasCalibratedWheelOffsets = allPositionOffsetsReady && allRotationOffsetsReady;
             }
         });
     }
