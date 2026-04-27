@@ -37,7 +37,7 @@ const canvas = document.querySelector('canvas.webgl')
 
 const scene = new THREE.Scene()
 
-scene.fog = new THREE.Fog('#1e2230', 120, 700);
+scene.fog = new THREE.FogExp2('#bcc7d4', 0.0018);
 
 scene.background = null;
 
@@ -104,7 +104,7 @@ world.defaultContactMaterial.restitution = 0.02
 
 */
 
-const dirLight = new THREE.DirectionalLight('#ffe3ad', 1.8);
+const dirLight = new THREE.DirectionalLight('#eddcad', 0.5);
 
 dirLight.position.set(-55, 85, -20);
 
@@ -448,9 +448,8 @@ material.needsUpdate = true
 
 
 
-const trackTextureSet = createSurfaceTextures('./textures/track/Asphalt025C_1K-JPG', 8, 8, Math.PI * 0.5)
-const terrainTextureSet = createSurfaceTextures('./textures/terrain/Road015C_1K-JPG', 16, 16, 0)
-const grassTextureSet = createSurfaceTextures('./textures/grass/Ground103_1K-JPG', 20, 20, 0)
+const trackTextureSet = createSurfaceTextures('./textures/track/Road007_1K-JPG', 8, 8, Math.PI * 0.5)
+const grassTextureSet = createSurfaceTextures('./textures/grass/Grass004_1K-JPG', 8, 8, 0)
 
 
 
@@ -460,7 +459,7 @@ const material = new THREE.MeshStandardMaterial({
 
 map: textureSet.colorMap,
 
-color: new THREE.Color("#2a2a2b"),
+color: new THREE.Color("white"),
 
 roughnessMap: textureSet.roughnessMap,
 
@@ -478,6 +477,7 @@ roughness: 1,
 
 metalness: 0,
 
+
 aoMapIntensity: 1,
 
 side: THREE.DoubleSide,
@@ -490,40 +490,16 @@ return material
 
 }
 
-const createTerrainMaterial = (textureSet) => {
+const createTerrainMaterial = () => {
 
 const material = new THREE.MeshStandardMaterial({
 
-map: textureSet.colorMap,
-
-color: new THREE.Color('#ffffff'),
-
-roughnessMap: textureSet.roughnessMap,
-
-displacementMap: textureSet.displacementMap,
-
-aoMap: textureSet.aoMap,
-
-normalMap: textureSet.normalMap,
-
-normalScale: new THREE.Vector2(1.2, 1.2),
-
-displacementScale: 0,
-
+color: new THREE.Color('#2a2a2b'),
 roughness: 1,
-
 metalness: 0,
-
-aoMapIntensity: 0.6,
-
 side: THREE.DoubleSide,
-
 })
-
-textureSet.materials.push(material)
-
 return material
-
 }
 
 
@@ -532,7 +508,7 @@ const createPoleMaterial = () => {
 
 return new THREE.MeshStandardMaterial({
 
-color: new THREE.Color('#2a2a2b'),
+color: new THREE.Color('black'),
 
 metalness: 0.7,
 
@@ -1171,7 +1147,7 @@ const isCompoundSurface = meshName.includes('compound') || meshName.includes('co
 const isPoleSurface = meshName.includes('pole') || hasPoleMarker(object)
 const isCageSurface = meshName.includes('cage') || hasCageMarker(object)
 
-object.castShadow = isCompoundSurface
+object.castShadow = isCompoundSurface || isPoleSurface || isCageSurface
 
 if (isTerrainSurface || isGrassSurface) {
 
@@ -1230,8 +1206,8 @@ isCompoundSurface
 : (isCageSurface
 ? createCageMaterial()
 : (isTerrainSurface
-? createTerrainMaterial(terrainTextureSet)
-: (isGrassSurface ? createTerrainMaterial(grassTextureSet) : createTrackMaterial(trackTextureSet)))))
+? createTerrainMaterial()
+: (isGrassSurface ? createTerrainMaterial() : createTrackMaterial(trackTextureSet)))))
 
 ))
 
@@ -1246,8 +1222,8 @@ object.material = isCompoundSurface
 : (isCageSurface
 ? createCageMaterial()
 : (isTerrainSurface
-? createTerrainMaterial(terrainTextureSet)
-: (isGrassSurface ? createTerrainMaterial(grassTextureSet) : createTrackMaterial(trackTextureSet)))))
+? createTerrainMaterial()
+: (isGrassSurface ? createTerrainMaterial() : createTrackMaterial(trackTextureSet)))))
 
 }
 
@@ -1362,9 +1338,12 @@ const pmremGenerator = new THREE.PMREMGenerator(renderer)
 
 pmremGenerator.compileEquirectangularShader()
 
-new EXRLoader().load('./hdri/EveningSkyHDRI030B_1K_HDR.exr', (exrTexture) => {
+new EXRLoader().load('./hdri/DaySkyHDRI001B_1K_HDR.exr', (exrTexture) => {
 
 exrTexture.mapping = THREE.EquirectangularReflectionMapping
+exrTexture.wrapS = THREE.RepeatWrapping
+// Rotate HDRI 180° around Y by shifting horizontal UV half turn.
+exrTexture.offset.x = -0.5
 
 const envMap = pmremGenerator.fromEquirectangular(exrTexture).texture
 
@@ -1377,8 +1356,6 @@ pmremGenerator.dispose()
 }, undefined, (error) => {
 
 console.error('Failed to load HDRI:', error)
-
-scene.background = new THREE.Color('#1a2030')
 
 })
 

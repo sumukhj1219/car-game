@@ -85,7 +85,7 @@ export default class Car {
 
         gltfLoader.load('./car/car.glb', (gltf) => {
             const carRoot = gltf.scene;
-            carRoot.updateMatrixWorld(true);
+            carRoot.updateMatrixWorld(true)
             const nodes = [];
             carRoot.traverse((object) => {
                 nodes.push(object);
@@ -129,6 +129,18 @@ export default class Car {
             this.scene.attach(this.chassis);
             this.chassisInitialWorldPosition = this.chassis.getWorldPosition(new THREE.Vector3());
             this.chassisInitialWorldQuaternion = this.chassis.getWorldQuaternion(new THREE.Quaternion());
+
+            // Apply metallic finish to chassis while preserving existing texture maps.
+            this.chassis.traverse((object) => {
+                if (!object.isMesh) return;
+                const materials = Array.isArray(object.material) ? object.material : [object.material];
+                materials.forEach((material) => {
+                    if (!material || material.metalness === undefined || material.roughness === undefined) return;
+                    material.metalness = 0.85;
+                    material.roughness = 0.22;
+                    material.needsUpdate = true;
+                });
+            });
         }, undefined, (error) => {
             console.error('Failed to load ./car/car.glb', error);
         });
@@ -207,7 +219,7 @@ export default class Car {
             maxSuspensionForce: 12000,
             rollInfluence: 0.08,
             axleLocal: new CANNON.Vec3(-1, 0, 0),
-            chassisConnectionPointLocal: new CANNON.Vec3(0.75, 0.1, -1.32),
+            chassisConnectionPointLocal: new CANNON.Vec3(-0.75, 0.1, -1.32),
             maxSuspensionTravel: 0.35,
         });
 
@@ -217,13 +229,13 @@ export default class Car {
             directionLocal: new CANNON.Vec3(0, -1, 0),
             suspensionStiffness: 55,
             suspensionRestLength: 0.45,
-            frictionSlip: 6.5,
+            frictionSlip: 4.5,
             dampingRelaxation: 2.3,
             dampingCompression: 2.8,
             maxSuspensionForce: 12000,
             rollInfluence: 0.08,
             axleLocal: new CANNON.Vec3(-1, 0, 0),
-            chassisConnectionPointLocal: new CANNON.Vec3(-0.78, 0.1, -1.32),
+            chassisConnectionPointLocal: new CANNON.Vec3(0.78, 0.1, -1.32),
             maxSuspensionTravel: 0.35,
         });
 
@@ -233,7 +245,7 @@ export default class Car {
             directionLocal: new CANNON.Vec3(0, -1, 0),
             suspensionStiffness: 55,
             suspensionRestLength: 0.45,
-            frictionSlip: 8.5,
+            frictionSlip: 4.5,
             dampingRelaxation: 2.4,
             dampingCompression: 2.9,
             maxSuspensionForce: 12500,
@@ -286,7 +298,9 @@ export default class Car {
         // steering never smoothly interpolated between steps.
         this.processControls = () => {
             const speed = this.car.chassisBody.velocity.length() * 3.6; // km/h
-            const steerLimit = maxSteerVal;
+            // Reduce steering authority as speed increases to avoid twitchy/jerky turns.
+            const speedSteerFactor = THREE.MathUtils.clamp(1 - (speed / 180), 0.38, 1);
+            const steerLimit = maxSteerVal * speedSteerFactor;
 
             const forward   = this.keysPressed.has('w') || this.keysPressed.has('arrowup');
             const reverse   = this.keysPressed.has('s') || this.keysPressed.has('arrowdown');
@@ -307,8 +321,8 @@ export default class Car {
 
             // Wheel order in this rig is front (0,1) then rear (2,3).
             // Keep rear wheels straight and steer only the front axle.
-            this.car.setSteeringValue(this.currentSteer, 0);
             this.car.setSteeringValue(this.currentSteer, 1);
+            this.car.setSteeringValue(this.currentSteer, 0);
             this.car.setSteeringValue(0, 2);
             this.car.setSteeringValue(0, 3);
 
